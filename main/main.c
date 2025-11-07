@@ -1,56 +1,161 @@
+// main.c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include "pico/stdlib.h"
+#include "hardware/i2c.h"
+#include "hardware/gpio.h"
+
 #include "FreeRTOS.h"
 #include "task.h"
+#include "queue.h"
 #include "semphr.h"
-#include <stdio.h>
 
-#include <stdio.h>
-#include "pico/stdlib.h"
+/* ============== PIN DEFINITIONS ============== */
+// I2C para o IMU MPU-6050 (HW-290)
+#define I2C_PORT i2c0
+#define I2C_SDA_PIN 8
+#define I2C_SCL_PIN 9
+
+// Botões
+#define BTN_GATILHO_PIN 10
+#define BTN_MIRA_PIN    11
+#define BTN_PROX_PIN    12
+#define BTN_ANT_PIN     13
+
+// LED de Status
+#define LED_STATUS_PIN 25
+
+/* ============== MPU6050 DEFINITIONS ============== */
+#define MPU6050_ADDR         0x68
+#define MPU6050_PWR_MGMT_1   0x6B
+#define MPU6050_GYRO_XOUT_H  0x43
+
+/* ============== RTOS HANDLES ============== */
+QueueHandle_t qButtonEvents;
+SemaphoreHandle_t uart_mutex;
+
+/* ============== STRUCTS ============== */
+// Struct para eventos de botão
+typedef struct {
+    uint8_t pin;
+} button_event_t;
 
 
-/* Semaphores */
-SemaphoreHandle_t semaphores[4];
+/* ============== MPU6050 HELPER FUNCTIONS ============== */
+void mpu6050_init() {
+    uint8_t buf[] = {MPU6050_PWR_MGMT_1, 0x00};
+    i2c_write_blocking(I2C_PORT, MPU6050_ADDR, buf, 2, false);
+}
 
-/* Task function */
-void vTask(void *pvParameters)
-{
-    int taskNum = (int)pvParameters;
+void mpu6050_read_gyro(int16_t gyro[3]) {
+    uint8_t buffer[6];
+    uint8_t reg = MPU6050_GYRO_XOUT_H;
+    
+    i2c_write_blocking(I2C_PORT, MPU6050_ADDR, &reg, 1, true);
+    i2c_read_blocking(I2C_PORT, MPU6050_ADDR, buffer, 6, false);
 
-    for (;;)
-    {
-        // Wait for my semaphore
-        xSemaphoreTake(semaphores[taskNum], portMAX_DELAY);
+    gyro[0] = (buffer[0] << 8) | buffer[1];
+    gyro[1] = (buffer[2] << 8) | buffer[3];
+    gyro[2] = (buffer[4] << 8) | buffer[5];
+}
 
-        // Critical section: do my work
-        printf("Hello from task %d\n", taskNum + 1);
 
-        // Release next task’s semaphore
-        int nextTask = (taskNum + 1) % 4;
-        vTaskDelay(pdTICKS_TO_MS(100)); // Simulate work with a delay
-        xSemaphoreGive(semaphores[nextTask]);
+/* ============== ISR (CALLBACK) ============== */
+void btn_callback(uint gpio, uint32_t events) {
+    if ((events & GPIO_IRQ_EDGE_FALL) != 0) {
+        button_event_t event = {.pin = gpio};
+        xQueueSendFromISR(qButtonEvents, &event, 0);
     }
 }
 
-int main(void)
-{
+
+/* ============== TASKS ============== */
+
+void imu_task(void *pvParameters) {
+    i2c_init(I2C_PORT, 400 * 1000);
+    gpio_set_function(I2C_SDA_PIN, GPIO_FUNC_I2C);
+    gpio_set_function(I2C_SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SDA_PIN);
+    gpio_pull_up(I2C_SCL_PIN);
+
+    mpu6050_init();
+
+    int16_t gyro[3];
+
+    while (1) {
+        mpu6050_read_gyro(gyro);
+
+        int16_t mouse_dx = gyro[1] / 100;
+        int16_t mouse_dy = -gyro[0] / 100;
+
+        if (abs(mouse_dx) > 0 || abs(mouse_dy) > 0) {
+            if (xSemaphoreTake(uart_mutex, portMAX_DELAY) == pdTRUE) {
+                printf("M,%d,%d\n", mouse_dx, mouse_dy);
+                xSemaphoreGive(uart_mutex);
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+void btn_task(void *pvParameters) {
+    uint8_t BTN_PINS[] = {BTN_GATILHO_PIN, BTN_MIRA_PIN, BTN_PROX_PIN, BTN_ANT_PIN};
+    for (int i = 0; i < sizeof(BTN_PINS)/sizeof(BTN_PINS[0]); i++) { // Corrigido para ser mais robusto
+        gpio_init(BTN_PINS[i]);
+        gpio_set_dir(BTN_PINS[i], GPIO_IN);
+        gpio_pull_up(BTN_PINS[i]);
+        gpio_set_irq_enabled_with_callback(BTN_PINS[i], GPIO_IRQ_EDGE_FALL, true, &btn_callback);
+    }
+
+    button_event_t received_event;
+    uint8_t button_id = 0;
+
+    while (1) {
+        if (xQueueReceive(qButtonEvents, &received_event, portMAX_DELAY) == pdPASS) {
+            
+            vTaskDelay(pdMS_TO_TICKS(50));
+            xQueueReset(qButtonEvents);
+
+            switch (received_event.pin) {
+                case BTN_GATILHO_PIN: button_id = 1; break;
+                case BTN_MIRA_PIN:    button_id = 2; break;
+                case BTN_PROX_PIN:    button_id = 3; break;
+                case BTN_ANT_PIN:     button_id = 4; break;
+                default:              button_id = 0; break;
+            }
+
+            if (button_id != 0) {
+                if (xSemaphoreTake(uart_mutex, portMAX_DELAY) == pdTRUE) {
+                    printf("B,%d\n", button_id);
+                    xSemaphoreGive(uart_mutex);
+                }
+            }
+        }
+    }
+}
+
+void status_task(void *pvParameters) {
+    gpio_init(LED_STATUS_PIN);
+    gpio_set_dir(LED_STATUS_PIN, GPIO_OUT);
+    gpio_put(LED_STATUS_PIN, 1);
+    vTaskSuspend(NULL); 
+}
+
+
+/* ============== MAIN ============== */
+int main(void) {
     stdio_init_all();
 
+    qButtonEvents = xQueueCreate(10, sizeof(button_event_t));
+    uart_mutex = xSemaphoreCreateMutex();
 
-    for (int i = 0; i < 4; i++)
-    {
-        semaphores[i] = xSemaphoreCreateBinary();
-    }
-
-    for (int i = 0; i < 4; i++)
-    {
-        char name[10];
-        snprintf(name, sizeof(name), "Task%d", i + 1);
-        xTaskCreate(vTask, name, configMINIMAL_STACK_SIZE, (void *)i, 1, NULL);
-    }
-
-    xSemaphoreGive(semaphores[0]);
+    xTaskCreate(imu_task, "IMUTask", 256, NULL, 1, NULL);
+    xTaskCreate(btn_task, "ButtonTask", 256, NULL, 1, NULL);
+    xTaskCreate(status_task, "StatusTask", 256, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
-    // Should never reach here
-    for (;;);
+    while (1);
 }
