@@ -1,25 +1,21 @@
 import serial
-import pyautogui
 import time
+import pydirectinput # FIX 1: Importa a biblioteca correta
+
+# Mantém o pyautogui para scroll, pois o pydirectinput não tem uma função de scroll fácil
+import pyautogui 
 
 # --- CONFIGURAÇÕES ---
-# Altere para a porta serial correta da sua Pico.
-# No Windows, é algo como "COM3". No Linux, "/dev/ttyACM0".
-SERIAL_PORT = "COM5"
+SERIAL_PORT = "COM5" # Verifique se esta é a porta correta
 BAUD_RATE = 115200
 
-# Desativa a trava de segurança do pyautogui que impede o mouse de ir para os cantos.
-pyautogui.FAILSAFE = False
-# Pequena pausa entre os comandos do pyautogui para não sobrecarregar
-pyautogui.PAUSE = 0.0
+# FIX 2: Configurações para pydirectinput
+pydirectinput.FAILSAFE = False
+pydirectinput.PAUSE = 0.0
 
 def process_serial_data(line):
     """Interpreta uma linha de dados vinda da Pico e executa a ação correspondente."""
-    
-    # Remove espaços em branco e quebras de linha
     line = line.strip()
-    
-    # Separa o comando ('M' ou 'B') dos dados
     parts = line.split(',')
     if not parts:
         return
@@ -31,19 +27,29 @@ def process_serial_data(line):
             # Comando de Movimento: M,dx,dy
             dx = int(parts[1])
             dy = int(parts[2])
-            pyautogui.moveRel(dx, dy, duration=0.0) # duration=0.0 é o mais rápido
+            # FIX 3: Usa moveRel do pydirectinput
+            pydirectinput.moveRel(dx, dy, relative=True)
             
-        elif command == 'B' and len(parts) == 2:
-            # Comando de Botão: B,id_botao
+        # MUDANÇA 5: Lida com eventos de "Botão Pressionado" (BD)
+        elif command == 'BD' and len(parts) == 2:
             button_id = int(parts[1])
             if button_id == 1: # Gatilho
-                pyautogui.click(button='left')
+                pydirectinput.mouseDown(button='left')
             elif button_id == 2: # Mira
-                pyautogui.click(button='right')
+                pydirectinput.mouseDown(button='right')
+
+        # MUDANÇA 6: Lida com eventos de "Botão Solto" (BU)
+        elif command == 'BU' and len(parts) == 2:
+            button_id = int(parts[1])
+            if button_id == 1: # Gatilho
+                pydirectinput.mouseUp(button='left')
+            elif button_id == 2: # Mira
+                pydirectinput.mouseUp(button='right')
+            # Botões de scroll são eventos únicos, então tratamos no "soltar" para simular um clique
             elif button_id == 3: # Próxima arma
-                pyautogui.scroll(1) # Scroll para cima
+                pyautogui.scroll(1) 
             elif button_id == 4: # Arma anterior
-                pyautogui.scroll(-1) # Scroll para baixo
+                pyautogui.scroll(-1)
 
     except (ValueError, IndexError) as e:
         print(f"Erro ao processar a linha '{line}': {e}")
@@ -60,18 +66,15 @@ def main():
         print("Conectado com sucesso! Lendo dados do controle...")
         
         while True:
-            # Lê uma linha da porta serial (terminada em '\n')
             if ser.in_waiting > 0:
                 line = ser.readline().decode('utf-8', errors='ignore')
                 if line:
                     process_serial_data(line)
-            # Uma pequena pausa para não sobrecarregar a CPU do PC
             time.sleep(0.001)
 
     except serial.SerialException as e:
         print(f"Erro: Não foi possível abrir a porta serial {SERIAL_PORT}.")
         print(f"Detalhes: {e}")
-        print("Por favor, verifique se o dispositivo está conectado e a porta está correta.")
     except KeyboardInterrupt:
         print("\nPrograma encerrado pelo usuário.")
     finally:
