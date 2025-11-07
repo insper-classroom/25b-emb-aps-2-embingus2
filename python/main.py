@@ -5,7 +5,7 @@ import time
 # --- CONFIGURAÇÕES ---
 # Altere para a porta serial correta da sua Pico.
 # No Windows, é algo como "COM3". No Linux, "/dev/ttyACM0".
-SERIAL_PORT = "COM3"
+SERIAL_PORT = "COM5"
 BAUD_RATE = 115200
 
 # Desativa a trava de segurança do pyautogui que impede o mouse de ir para os cantos.

@@ -14,8 +14,8 @@
 /* ============== PIN DEFINITIONS ============== */
 // I2C para o IMU MPU-6050 (HW-290)
 #define I2C_PORT i2c0
-#define I2C_SDA_PIN 8
-#define I2C_SCL_PIN 9
+#define I2C_SDA_PIN 4
+#define I2C_SCL_PIN 5
 
 // Botões
 #define BTN_GATILHO_PIN 10
@@ -35,12 +35,16 @@
 QueueHandle_t qButtonEvents;
 SemaphoreHandle_t uart_mutex;
 
+int32_t gyro_x_offset = 0;
+int32_t gyro_y_offset = 0;
 /* ============== STRUCTS ============== */
 // Struct para eventos de botão
 typedef struct {
     uint8_t pin;
 } button_event_t;
 
+
+#define GYRO_DEADZONE 10.f
 
 /* ============== MPU6050 HELPER FUNCTIONS ============== */
 void mpu6050_init() {
@@ -83,11 +87,48 @@ void imu_task(void *pvParameters) {
 
     int16_t gyro[3];
 
+    if (xSemaphoreTake(uart_mutex, portMAX_DELAY) == pdTRUE) {
+        printf("Iniciando calibracao do IMU... Mantenha parado!\n");
+        xSemaphoreGive(uart_mutex);
+    }
+
+    const int CALIBRATION_SAMPLES = 1000;
+    gyro_x_offset = 0; // Reseta offsets
+    gyro_y_offset = 0;
+
+    for (int i = 0; i < CALIBRATION_SAMPLES; i++) {
+        mpu6050_read_gyro(gyro);
+        gyro_x_offset += gyro[0];
+        gyro_y_offset += gyro[1];
+        vTaskDelay(pdMS_TO_TICKS(2)); // Pequeno delay entre leituras
+    }
+
+    gyro_x_offset /= CALIBRATION_SAMPLES;
+    gyro_y_offset /= CALIBRATION_SAMPLES;
+
+    if (xSemaphoreTake(uart_mutex, portMAX_DELAY) == pdTRUE) {
+        printf("Calibracao concluida. Offsets: X=%ld, Y=%ld\n", gyro_x_offset, gyro_y_offset);
+        xSemaphoreGive(uart_mutex);
+    }
+
+
     while (1) {
         mpu6050_read_gyro(gyro);
+    
+        int16_t corrected_gx = gyro[0] - (int16_t)gyro_x_offset;
+        int16_t corrected_gy = gyro[1] - (int16_t)gyro_y_offset;
 
-        int16_t mouse_dx = gyro[1] / 100;
-        int16_t mouse_dy = -gyro[0] / 100;
+        int16_t mouse_dx = corrected_gy;
+        int16_t mouse_dy = -corrected_gx; 
+
+        if (abs(corrected_gy) < GYRO_DEADZONE) {
+            mouse_dx = 0;
+        }
+        if (abs(corrected_gx) < GYRO_DEADZONE) {
+            mouse_dy = 0;
+        }
+        mouse_dx = mouse_dx / 100;
+        mouse_dy = mouse_dy / 100;
 
         if (abs(mouse_dx) > 0 || abs(mouse_dy) > 0) {
             if (xSemaphoreTake(uart_mutex, portMAX_DELAY) == pdTRUE) {
