@@ -18,7 +18,7 @@
 #define I2C_SCL_PIN 5
 
 // Botões
-#define BTN_GATILHO_PIN 10
+#define BTN_GATILHO_PIN 16
 #define BTN_MIRA_PIN    11
 #define BTN_PROX_PIN    12
 #define BTN_ANT_PIN     13
@@ -99,7 +99,7 @@ void imu_task(void *pvParameters) {
     for (int i = 0; i < CALIBRATION_SAMPLES; i++) {
         mpu6050_read_gyro(gyro);
         gyro_x_offset += gyro[0];
-        gyro_y_offset += gyro[1];
+        gyro_y_offset += gyro[2];
         vTaskDelay(pdMS_TO_TICKS(2)); // Pequeno delay entre leituras
     }
 
@@ -116,7 +116,7 @@ void imu_task(void *pvParameters) {
         mpu6050_read_gyro(gyro);
     
         int16_t corrected_gx = gyro[0] - (int16_t)gyro_x_offset;
-        int16_t corrected_gy = gyro[1] - (int16_t)gyro_y_offset;
+        int16_t corrected_gy = gyro[2] - (int16_t)gyro_y_offset;
 
         int16_t mouse_dx = corrected_gy;
         int16_t mouse_dy = -corrected_gx; 
