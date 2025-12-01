@@ -25,26 +25,21 @@
 
 #define LED_STATUS_PIN 25
 
-/* ============== MPU6050 DEFINITIONS ============== */
 #define MPU6050_ADDR         0x68
 #define MPU6050_PWR_MGMT_1   0x6B
 #define MPU6050_GYRO_XOUT_H  0x43
 #define GYRO_DEADZONE        10.0f
 
-/* ============== RTOS HANDLES ============== */
 QueueHandle_t qButtonEvents;
 SemaphoreHandle_t uart_mutex;
 
 
 
-/* ============== STRUCTS ============== */
-// MUDANÇA 1: Struct agora inclui o estado do botão (pressionado/solto)
 typedef struct {
     uint8_t pin;
-    uint8_t state; // 1 para PRESSIONADO (FALL), 0 para SOLTO (RISE)
+    uint8_t state; 
 } button_event_t;
 
-/* ============== MPU6050 HELPER FUNCTIONS ============== */
 void mpu6050_init() {
     uint8_t buf[] = {MPU6050_PWR_MGMT_1, 0x00};
     i2c_write_blocking(I2C_PORT, MPU6050_ADDR, buf, 2, false);
@@ -63,8 +58,6 @@ void mpu6050_read_gyro(int16_t gyro[3]) {
 }
 
 
-/* ============== ISR (CALLBACK) ============== */
-// MUDANÇA 2: Callback agora envia o estado junto com o pino
 void btn_callback(uint gpio, uint32_t events) {
     button_event_t event = {.pin = gpio};
     if ((events & GPIO_IRQ_EDGE_FALL) != 0) {
@@ -77,7 +70,6 @@ void btn_callback(uint gpio, uint32_t events) {
 }
 
 
-/* ============== TASKS ============== */
 
 void imu_task(void *pvParameters) {
     i2c_init(I2C_PORT, 400 * 1000);
@@ -97,7 +89,7 @@ void imu_task(void *pvParameters) {
     for (int i = 0; i < CALIBRATION_SAMPLES; i++) {
         mpu6050_read_gyro(gyro);
         gyro_x_offset += gyro[0];
-        gyro_y_offset += gyro[1]; // Usando Z para Yaw
+        gyro_y_offset += gyro[1]; 
         vTaskDelay(pdMS_TO_TICKS(2));
     }
 
@@ -108,7 +100,7 @@ void imu_task(void *pvParameters) {
     while (1) {
         mpu6050_read_gyro(gyro);
         int16_t corrected_gx = gyro[0] - (int16_t)gyro_x_offset;
-        int16_t corrected_gy = gyro[1] - (int16_t)gyro_y_offset; // Usando Z para Yaw
+        int16_t corrected_gy = gyro[1] - (int16_t)gyro_y_offset; 
 
         int16_t mouse_dx = -corrected_gy / 100;
         int16_t mouse_dy = -corrected_gx / 100;
@@ -132,7 +124,6 @@ void btn_task(void *pvParameters) {
         gpio_init(BTN_PINS[i]);
         gpio_set_dir(BTN_PINS[i], GPIO_IN);
         gpio_pull_up(BTN_PINS[i]);
-        // MUDANÇA 3: Habilita interrupção para subida E descida
         gpio_set_irq_enabled_with_callback(BTN_PINS[i], GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &btn_callback);
     }
 
@@ -141,7 +132,6 @@ void btn_task(void *pvParameters) {
 
     while (1) {
         if (xQueueReceive(qButtonEvents, &received_event, portMAX_DELAY) == pdPASS) {
-            // REMOVIDO: Debounce com delay e reset de fila não funciona bem com estados
             switch (received_event.pin) {
                 case BTN_GATILHO_PIN: button_id = 1; break;
                 case BTN_MIRA_PIN:    button_id = 2; break;
@@ -153,10 +143,9 @@ void btn_task(void *pvParameters) {
 
             if (button_id != 0) {
                 if (xSemaphoreTake(uart_mutex, portMAX_DELAY) == pdTRUE) {
-                    // MUDANÇA 4: Envia "BD" para Pressionado, "BU" para Solto
-                    if (received_event.state == 1) { // Pressionado
+                    if (received_event.state == 1) { 
                         printf("BD,%d\n", button_id);
-                    } else { // Solto
+                    } else { 
                         printf("BU,%d\n", button_id);
                     }
                     xSemaphoreGive(uart_mutex);
@@ -177,7 +166,7 @@ int main(void) {
     stdio_init_all();
     qButtonEvents = xQueueCreate(10, sizeof(button_event_t));
     uart_mutex = xSemaphoreCreateMutex();
-    xTaskCreate(imu_task, "IMUTask", 512, NULL, 1, NULL); // Aumentei um pouco o stack por causa da calibração
+    xTaskCreate(imu_task, "IMUTask", 512, NULL, 1, NULL); 
     xTaskCreate(btn_task, "ButtonTask", 256, NULL, 1, NULL);
     xTaskCreate(status_task, "StatusTask", 256, NULL, 1, NULL);
     vTaskStartScheduler();
