@@ -35,8 +35,7 @@
 QueueHandle_t qButtonEvents;
 SemaphoreHandle_t uart_mutex;
 
-int32_t gyro_x_offset = 0;
-int32_t gyro_y_offset = 0;
+
 
 /* ============== STRUCTS ============== */
 // MUDANÇA 1: Struct agora inclui o estado do botão (pressionado/solto)
@@ -90,8 +89,8 @@ void imu_task(void *pvParameters) {
 
     printf("Iniciando calibracao do IMU... Mantenha parado!\n");
     const int CALIBRATION_SAMPLES = 3000;
-    gyro_x_offset = 0;
-    gyro_y_offset = 0;
+    int32_t gyro_x_offset = 0;
+    int32_t gyro_y_offset = 0;
     int16_t gyro[3];
 
 
