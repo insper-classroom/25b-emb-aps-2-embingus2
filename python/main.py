@@ -1,20 +1,27 @@
 import serial
 import time
-import pydirectinput # FIX 1: Importa a biblioteca correta
-
-# Mantém o pyautogui para scroll, pois o pydirectinput não tem uma função de scroll fácil
+import pydirectinput
 import pyautogui 
 
 # --- CONFIGURAÇÕES ---
-SERIAL_PORT = "COM5" # Verifique se esta é a porta correta
+SERIAL_PORT = "COM5" 
 BAUD_RATE = 115200
 
-# FIX 2: Configurações para pydirectinput
 pydirectinput.FAILSAFE = False
 pydirectinput.PAUSE = 0.0
 
+# ==========================================================
+# MUDANÇA 1: Variável de estado global para o script Python
+# ==========================================================
+imu_active = True
+
+
 def process_serial_data(line):
     """Interpreta uma linha de dados vinda da Pico e executa a ação correspondente."""
+    
+    # Precisamos informar à função que vamos MODIFICAR a variável global
+    global imu_active 
+    
     line = line.strip()
     parts = line.split(',')
     if not parts:
@@ -23,33 +30,37 @@ def process_serial_data(line):
     command = parts[0]
     
     try:
-        if command == 'M' and len(parts) == 3:
-            # Comando de Movimento: M,dx,dy
-            dx = int(parts[1])
-            dy = int(parts[2])
-            # FIX 3: Usa moveRel do pydirectinput
-            pydirectinput.moveRel(dx, dy, relative=True)
-            
-        # MUDANÇA 5: Lida com eventos de "Botão Pressionado" (BD)
-        elif command == 'BD' and len(parts) == 2:
+        # MUDANÇA 2: Lidar com "Botão Pressionado" (BD)
+        if command == 'BD' and len(parts) == 2:
             button_id = int(parts[1])
             if button_id == 1: # Gatilho
                 pydirectinput.mouseDown(button='left')
             elif button_id == 2: # Mira
                 pydirectinput.mouseDown(button='right')
+            elif button_id == 5: # <-- MUDANÇA 2.1: Detecta o botão de "levantar"
+                imu_active = False # Desativa o movimento da IMU
 
-        # MUDANÇA 6: Lida com eventos de "Botão Solto" (BU)
+        # MUDANÇA 3: Lidar com Movimento (M)
+        elif command == 'M' and len(parts) == 3:
+            # MUDANÇA 3.1: Só processa o movimento se a IMU estiver ativa
+            if imu_active:
+                dx = int(parts[1])
+                dy = int(parts[2])
+                pydirectinput.moveRel(dx, dy, relative=True)
+                
+        # MUDANÇA 4: Lidar com "Botão Solto" (BU)
         elif command == 'BU' and len(parts) == 2:
             button_id = int(parts[1])
             if button_id == 1: # Gatilho
                 pydirectinput.mouseUp(button='left')
             elif button_id == 2: # Mira
                 pydirectinput.mouseUp(button='right')
-            # Botões de scroll são eventos únicos, então tratamos no "soltar" para simular um clique
             elif button_id == 3: # Próxima arma
-                pyautogui.scroll(1) 
+                pyautogui.scroll(120) 
             elif button_id == 4: # Arma anterior
                 pyautogui.scroll(-1)
+            elif button_id == 5: # <-- MUDANÇA 4.1: Detecta o soltar do botão
+                imu_active = True # Reativa o movimento da IMU
 
     except (ValueError, IndexError) as e:
         print(f"Erro ao processar a linha '{line}': {e}")

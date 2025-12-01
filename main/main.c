@@ -16,10 +16,12 @@
 #define I2C_SDA_PIN 4
 #define I2C_SCL_PIN 5
 
-#define BTN_GATILHO_PIN 16
-#define BTN_MIRA_PIN    11
-#define BTN_PROX_PIN    12
+#define BTN_GATILHO_PIN 17
+#define BTN_MIRA_PIN    16
+#define BTN_PROX_PIN    28
 #define BTN_ANT_PIN     13
+#define BTN_MOUSE_PULL  27
+
 
 #define LED_STATUS_PIN 25
 
@@ -87,17 +89,19 @@ void imu_task(void *pvParameters) {
     mpu6050_init();
 
     printf("Iniciando calibracao do IMU... Mantenha parado!\n");
-    const int CALIBRATION_SAMPLES = 1000;
+    const int CALIBRATION_SAMPLES = 3000;
     gyro_x_offset = 0;
     gyro_y_offset = 0;
     int16_t gyro[3];
 
+
     for (int i = 0; i < CALIBRATION_SAMPLES; i++) {
         mpu6050_read_gyro(gyro);
         gyro_x_offset += gyro[0];
-        gyro_y_offset += gyro[2]; // Usando Z para Yaw
+        gyro_y_offset += gyro[1]; // Usando Z para Yaw
         vTaskDelay(pdMS_TO_TICKS(2));
     }
+
     gyro_x_offset /= CALIBRATION_SAMPLES;
     gyro_y_offset /= CALIBRATION_SAMPLES;
     printf("Calibracao concluida. Offsets: X=%ld, Y=%ld\n", gyro_x_offset, gyro_y_offset);
@@ -105,7 +109,7 @@ void imu_task(void *pvParameters) {
     while (1) {
         mpu6050_read_gyro(gyro);
         int16_t corrected_gx = gyro[0] - (int16_t)gyro_x_offset;
-        int16_t corrected_gy = gyro[2] - (int16_t)gyro_y_offset; // Usando Z para Yaw
+        int16_t corrected_gy = gyro[1] - (int16_t)gyro_y_offset; // Usando Z para Yaw
 
         int16_t mouse_dx = -corrected_gy / 100;
         int16_t mouse_dy = -corrected_gx / 100;
@@ -115,7 +119,7 @@ void imu_task(void *pvParameters) {
 
         if (mouse_dx != 0 || mouse_dy != 0) {
             if (xSemaphoreTake(uart_mutex, portMAX_DELAY) == pdTRUE) {
-                printf("M,%d,%d\n", mouse_dx, mouse_dy);
+                printf("M,%d,%d\n", mouse_dx, -mouse_dy);
                 xSemaphoreGive(uart_mutex);
             }
         }
@@ -124,7 +128,7 @@ void imu_task(void *pvParameters) {
 }
 
 void btn_task(void *pvParameters) {
-    uint8_t BTN_PINS[] = {BTN_GATILHO_PIN, BTN_MIRA_PIN, BTN_PROX_PIN, BTN_ANT_PIN};
+    uint8_t BTN_PINS[] = {BTN_GATILHO_PIN, BTN_MIRA_PIN, BTN_PROX_PIN, BTN_ANT_PIN,BTN_MOUSE_PULL};
     for (int i = 0; i < sizeof(BTN_PINS)/sizeof(BTN_PINS[0]); i++) {
         gpio_init(BTN_PINS[i]);
         gpio_set_dir(BTN_PINS[i], GPIO_IN);
@@ -144,6 +148,7 @@ void btn_task(void *pvParameters) {
                 case BTN_MIRA_PIN:    button_id = 2; break;
                 case BTN_PROX_PIN:    button_id = 3; break;
                 case BTN_ANT_PIN:     button_id = 4; break;
+                case BTN_MOUSE_PULL:  button_id = 5; break; 
                 default:              button_id = 0; break;
             }
 
