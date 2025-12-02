@@ -74,6 +74,10 @@ O diagrama de blocos a seguir detalha a arquitetura do firmware e **foi validado
 
 - **Semáforos / Mutexes (Consideração de Implementação):**
   - Um **mutex** (`uart_mutex`) é utilizado para proteger o acesso à UART. Como tanto a `imu_task` quanto a `btn_task` enviam dados, o mutex garante que as mensagens não se misturem, evitando corrupção do protocolo.
+ 
+##  Protótipo
+
+![Prototipo](prototipo.jpg)
 
 ## ✅ Qualidade de Código
 
